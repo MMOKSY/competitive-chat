@@ -1,0 +1,5 @@
+fastapi
+uvicorn
+python-dotenv
+sqlalchemy>=2.0
+asyncpg
