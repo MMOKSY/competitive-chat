@@ -8,6 +8,13 @@ from database import get_db
 from database import engine, Base, AsyncSessionLocal
 from models import User
 
+from fastapi.security import OAuth2PasswordBearer
+from jose import JWTError
+from schemas import Token, UserOut  # you'll add these schemas
+from core.security import create_access_token, decode_access_token
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
@@ -60,4 +67,25 @@ async def login_user(user: UserLogin, db: AsyncSession = Depends(get_db)):
     if not existing_user or not verify_password(user.password, existing_user.hashed_password):
         raise HTTPException(status_code=400, detail="Invalid username or password")
 
-    return {"message": "Login successful"}
+    token = create_access_token(subject=str(existing_user.id))
+    return {"access_token": token, "token_type": "bearer"}
+
+async def get_current_user(
+    token: str = Depends(oauth2_scheme),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        user_id = decode_access_token(token)  # returns "sub"
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+    result = await db.execute(select(User).where(User.id == int(user_id)))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+
+    return user
+
+@app.get("/users/me", response_model=UserOut)
+async def read_current_user(current_user: User = Depends(get_current_user)):
+    return current_user
