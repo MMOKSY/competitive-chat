@@ -1,7 +1,16 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, text
+from sqlalchemy import select, text, and_, or_, desc
+
+from schemas import (
+    GroupCreate, GroupOut,
+    GroupMessageCreate, GroupMessageOut,
+    PrivateMessageCreate, PrivateMessageOut
+)
+
+from models import Group, GroupMember, GroupMessage, PrivateMessage
+
 from core.security import hash_password, verify_password
 from schemas import UserCreate, UserLogin
 from database import get_db
@@ -13,6 +22,7 @@ from jose import JWTError
 from schemas import Token, UserOut  # you'll add these schemas
 from core.security import create_access_token, decode_access_token
 
+# When a route uses this, look for an Authorization: Bearer <token> header.
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
 @asynccontextmanager
@@ -89,3 +99,159 @@ async def get_current_user(
 @app.get("/users/me", response_model=UserOut)
 async def read_current_user(current_user: User = Depends(get_current_user)):
     return current_user
+
+# create private message
+@app.post("/messages/private", response_model=PrivateMessageOut)
+async def create_private_message(
+    message: PrivateMessageCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    # checks to prevent messaging oneself
+    if message.receiver_id == current_user.id:
+        raise HTTPException(status_code=400, detail="Cannot message yourself")
+
+    receiver_query = await db.execute(select(User).where(User.id == message.receiver_id))
+    receiver = receiver_query.scalar_one_or_none()
+
+    # ensure receiver exists
+    if not receiver:
+        raise HTTPException(status_code=404, detail="Receiver not found")
+
+    new_message = PrivateMessage(
+        sender_id=current_user.id,
+        receiver_id=message.receiver_id,
+        content=message.content,
+    )
+
+    # save to db
+    db.add(new_message)
+    await db.commit()
+    await db.refresh(new_message)
+
+    return new_message
+
+# get private messages between current user and another user
+@app.get("/messages/private/{other_user_id}", response_model=list[PrivateMessageOut])
+async def get_private_messages(
+    other_user_id: int,
+    current_user: User = Depends(get_current_user),
+    limit: int = 50,
+    db: AsyncSession = Depends(get_db),
+):
+    messages_query = await db.execute(
+        select(PrivateMessage).where(
+            or_(
+                and_(
+                    PrivateMessage.sender_id == current_user.id,
+                    PrivateMessage.receiver_id == other_user_id,
+                ),
+                and_(
+                    PrivateMessage.sender_id == other_user_id,
+                    PrivateMessage.receiver_id == current_user.id,
+                ),
+            )
+        ).order_by(PrivateMessage.created_at)
+        .limit(limit)
+    )
+    messages = messages_query.scalars().all()
+    return messages
+
+# create group
+@app.post("/groups", response_model=GroupOut)
+async def create_group(
+    group: GroupCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    new_group = Group(name=group.name, created_by=current_user.id)
+
+    db.add(new_group)
+    await db.commit()
+    await db.refresh(new_group)
+
+    # add creator as member
+    membership = GroupMember(group_id=new_group.id, user_id=current_user.id)
+    db.add(membership)
+    await db.commit()
+
+    return new_group
+
+# create group message
+@app.post("/groups/{group_id}/messages", response_model=GroupMessageOut)
+async def create_group_message(
+    group_id: int,
+    message: GroupMessageCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    # check if user is a member of the group
+    membership_query = await db.execute(
+        select(GroupMember).where(
+            and_(
+                GroupMember.group_id == group_id,
+                GroupMember.user_id == current_user.id,
+            )
+        )
+    )
+    membership = membership_query.scalar_one_or_none()
+
+    if not membership:
+        raise HTTPException(status_code=403, detail="Not a member of the group")
+
+    new_message = GroupMessage(
+        group_id=group_id,
+        sender_id=current_user.id,
+        content=message.content,
+    )
+
+    db.add(new_message)
+    await db.commit()
+    await db.refresh(new_message)
+
+    return new_message
+
+# fetch group messages
+@app.get("/groups/{group_id}/messages", response_model=list[GroupMessageOut])
+async def get_group_messages(
+    group_id: int,
+    current_user: User = Depends(get_current_user),
+    limit: int = 50,
+    db: AsyncSession = Depends(get_db),
+):
+    # check if user is a member of the group
+    membership_query = await db.execute(
+        select(GroupMember).where(
+            and_(
+                GroupMember.group_id == group_id,
+                GroupMember.user_id == current_user.id,
+            )
+        )
+    )
+    membership = membership_query.scalar_one_or_none()
+
+    if not membership:
+        raise HTTPException(status_code=403, detail="Not a member of the group")
+
+    messages_query = await db.execute(
+        select(GroupMessage)
+        .where(GroupMessage.group_id == group_id)
+        .order_by(desc(GroupMessage.created_at))
+        .limit(limit)
+    )
+    messages = messages_query.scalars().all()
+    return messages
+
+# list groups current user is a member of
+@app.get("/groups", response_model=list[GroupOut])
+async def list_user_groups(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    memberships_query = await db.execute(
+        select(Group)
+        .join(GroupMember)
+        .where(GroupMember.user_id == current_user.id)
+    )
+    groups = memberships_query.scalars().all()
+    return groups
