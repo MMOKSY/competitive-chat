@@ -1,12 +1,12 @@
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.declarative import declarative_base
 import os
 from dotenv import load_dotenv
 
 load_dotenv()
 
-DATABASE_URL = os.getenv("DATABASE_URL")  # e.g., postgresql+asyncpg://postgres:password@localhost:5432/competitive_chat
-
+DATABASE_URL = os.getenv("DATABASE_URL") 
 # Async engine
 engine = create_async_engine(DATABASE_URL, echo=True)
 
@@ -21,3 +21,6 @@ AsyncSessionLocal = sessionmaker(
 async def get_db():
     async with AsyncSessionLocal() as session:
         yield session
+
+# Base class for models
+Base = declarative_base()
