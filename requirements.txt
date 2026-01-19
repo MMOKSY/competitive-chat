@@ -1,9 +1,19 @@
 fastapi
 uvicorn
 python-dotenv
+
+# Database
 sqlalchemy>=2.0
 asyncpg
+
+# Auth / Security
 passlib[argon2]
 python-jose[cryptography]
 python-multipart
-jose
+
+# Realtime (Socket.IO)
+python-socketio[asgi]
+
+# Testing / Clients
+requests
+python-socketio[client]
