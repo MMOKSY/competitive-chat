@@ -13,6 +13,7 @@ python-multipart
 
 # Realtime (Socket.IO)
 python-socketio[asgi]
+python-socketio[client]
 
 # Testing / Clients
 requests
