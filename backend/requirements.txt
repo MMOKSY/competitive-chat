@@ -1,0 +1,20 @@
+fastapi
+uvicorn
+python-dotenv
+
+# Database
+sqlalchemy>=2.0
+asyncpg
+
+# Auth / Security
+passlib[argon2]
+python-jose[cryptography]
+python-multipart
+
+# Realtime (Socket.IO)
+python-socketio[asgi]
+python-socketio[client]
+
+# Testing / Clients
+requests
+python-socketio[client]
